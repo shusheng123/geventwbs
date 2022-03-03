@@ -1,12 +1,13 @@
 import re
+import time
 import base64
 import hashlib
 import logging
 
 from gevent.pywsgi import WSGIHandler
-from .utils import PY3
 from .exceptions import WebSocketError
 from .websocket import WebSocket, Stream
+from zbase3.base import logger
 
 log = logging.getLogger()
 
@@ -27,13 +28,18 @@ class WebSocketApplication(object):
         self.on_open()
         while True:
             try:
+                # 如果已经关闭了直接跳出
+                if self.ws.closed:
+                    break
                 message = self.ws.receive()
-                log.info('content:%s', message)
+                stime = time.time()
             except WebSocketError:
-                self.on_close()
+                self.on_close('close')
                 break
-
-            self.on_message(message)
+            if message:
+                resp = self.on_message(message)
+                log.info('time=%s|req=%s|resp=%s', time.time()-stime, message, resp)
+                self.ws.send(resp)
 
     def on_open(self, *args, **kwargs):
         pass
@@ -42,7 +48,7 @@ class WebSocketApplication(object):
         pass
 
     def on_message(self, message, *args, **kwargs):
-        self.ws.send(message, **kwargs)
+        return message
 
     @classmethod
     def protocol_name(cls):
@@ -105,6 +111,10 @@ class Resource(object):
 
 class WebSocketHandler(WSGIHandler):
 
+    def __init__(self, *args, **kwargs):
+        logger.set_req_id()
+        super(WebSocketHandler, self).__init__(*args, **kwargs)
+
     SUPPORTED_VERSIONS = ('13', '8', '7')
     GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
@@ -145,6 +155,7 @@ class WebSocketHandler(WSGIHandler):
             self.run_websocket()
         else:
             self.result = ['No Websocket protocol defined']
+            self.close_connection = True
 
     def upgrade_websocket(self):
         """判断请求头部信息是否正确 返回处理结果
@@ -252,12 +263,9 @@ class WebSocketHandler(WSGIHandler):
             'wsgi.websocket': self.websocket
         })
 
-        if PY3:
-            accept = base64.b64encode(
-                hashlib.sha1((key + self.GUID).encode("latin-1")).digest()
-            ).decode("latin-1")
-        else:
-            accept = base64.b64encode(hashlib.sha1(key + self.GUID).digest())
+        accept = base64.b64encode(
+            hashlib.sha1((key + self.GUID).encode("latin-1")).digest()
+        ).decode("latin-1")
 
         headers = [
             ("Upgrade", "websocket"),
@@ -292,7 +300,7 @@ class WebSocketHandler(WSGIHandler):
         return writer
 
     def _prepare_response(self):
-        """websocket 协议 需要设置 wsgi 返回设置
+        """websocket 不支持部分http协议 
         """
         assert not self.headers_sent
 

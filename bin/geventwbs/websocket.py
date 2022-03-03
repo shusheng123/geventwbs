@@ -177,7 +177,6 @@ class WebSocket(object):
 
         if not self._is_valid_close_code(code):
             raise ProtocolError('Invalid close code {0}'.format(code))
-
         self.close(code, payload)
 
     def handle_ping(self, header, payload):
@@ -461,7 +460,6 @@ class Header(object):
         """
         read = stream.read
         data = read(2)
-        print(data)
 
         if len(data) != 2:
             raise WebSocketError("Unexpected EOF while decoding header")
