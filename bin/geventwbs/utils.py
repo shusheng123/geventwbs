@@ -2,20 +2,6 @@ from __future__ import absolute_import, division, print_function
 import sys
 import subprocess
 
-def get_hg_changeset():
-    rev, err = subprocess.Popen(
-        'hg id -i',
-        shell=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    ).communicate()
-
-    if err:
-        return None
-    else:
-        return rev.strip().replace('+', '')
-
-
 UTF8_ACCEPT = 0
 UTF8_REJECT = 1
 PY3 = sys.version_info[0] == 3
