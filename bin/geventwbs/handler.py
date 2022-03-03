@@ -143,7 +143,8 @@ class WebSocketHandler(WSGIHandler):
                 self.write('')
 
             self.run_websocket()
-        self.result = ['No Websocket protocol defined']
+        else:
+            self.result = ['No Websocket protocol defined']
 
     def upgrade_websocket(self):
         """判断请求头部信息是否正确 返回处理结果

@@ -1,0 +1,12 @@
+*.pyc
+*.pyo
+*.pyd
+*.o
+__pycache__
+*.swp
+zbase3
+*.so
+.pytest_cache
+.idea
+log/
+.vscode
