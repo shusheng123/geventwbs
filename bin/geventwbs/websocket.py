@@ -364,9 +364,8 @@ class WebSocket(object):
         except WebSocketError:
             # Failed to write the closing frame but it's ok because we're
             # closing the socket anyway.
-            log.info("Failed to write closing frame -> closing socket")
+            log.debug("Failed to write closing frame -> closing socket")
         finally:
-            log.info("Closed WebSocket")
             self.closed = True
 
             self.stream = None

@@ -25,6 +25,7 @@ class WebSocketApplication(object):
         self.ws = ws
 
     def handle(self):
+        logger.set_req_id()
         self.on_open()
         while True:
             try:
@@ -112,7 +113,6 @@ class Resource(object):
 class WebSocketHandler(WSGIHandler):
 
     def __init__(self, *args, **kwargs):
-        logger.set_req_id()
         super(WebSocketHandler, self).__init__(*args, **kwargs)
 
     SUPPORTED_VERSIONS = ('13', '8', '7')
