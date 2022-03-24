@@ -4,6 +4,7 @@ import base64
 import hashlib
 import logging
 
+from gevent.pywsgi import WSGIServer
 from gevent.pywsgi import WSGIHandler
 from .exceptions import WebSocketError
 from .websocket import WebSocket, Stream
@@ -319,3 +320,20 @@ class WebSocketHandler(WSGIHandler):
 
         # Prevents the Date header from being written
         self.provided_date = True
+
+
+class WebSocketServer(WSGIServer):
+    handler_class = WebSocketHandler
+
+    def __init__(self, *args, **kwargs):
+        self.clients = {}
+
+        super(WebSocketServer, self).__init__(*args, **kwargs)
+
+    def handle(self, socket, address):
+        handler = self.handler_class(socket, address, self)
+        handler.handle()
+    
+    def serve_forever(self):
+        log.info('%s server started at:%d', self.address[0], self.address[1])
+        super().serve_forever()

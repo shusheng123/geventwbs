@@ -1,9 +1,32 @@
+"""
+0                   1                   2                   3
+0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
++-+-+-+-+-------+-+-------------+-------------------------------+
+|F|R|R|R| opcode|M| Payload len |    Extended payload length    |
+|I|S|S|S|  (4)  |A|     (7)     |             (16/64)           |
+|N|V|V|V|       |S|             |   (if payload len==126/127)   |
+| |1|2|3|       |K|             |                               |
++-+-+-+-+-------+-+-------------+ - - - - - - - - - - - - - - - +
+|     Extended payload length continued, if payload len == 127  |
++ - - - - - - - - - - - - - - - +-------------------------------+
+|                               |Masking-key, if MASK set to 1  |
++-------------------------------+-------------------------------+
+| Masking-key (continued)       |          Payload Data         |
++-------------------------------- - - - - - - - - - - - - - - - +
+:                     Payload Data continued ...                :
++ - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - +
+|                     Payload Data continued ...                |
++---------------------------------------------------------------+
+~~~~~~~~~~
+websocket 报文协议
+
+"""
+
 import struct
 import logging
 
 from socket import error
 
-from .utils import Utf8Validator, string_types, range_type, text_type
 from .exceptions import ProtocolError
 from .exceptions import WebSocketError
 from .exceptions import FrameTooLargeException
@@ -17,24 +40,15 @@ MSG_CLOSED = "Connection closed"
 
 
 class WebSocket(object):
-    """
-    Base class for supporting websocket operations.
 
-    :ivar environ: The http environment referenced by this connection.
-    :ivar closed: Whether this connection is closed/closing.
-    :ivar stream: The underlying file like object that will be read from /
-        written to by this WebSocket object.
-    """
+    __slots__ = ('environ', 'closed', 'stream', 'raw_write', 'raw_read', 'handler')
 
-    __slots__ = ('utf8validator', 'utf8validate_last', 'environ', 'closed',
-                 'stream', 'raw_write', 'raw_read', 'handler')
-
-    OPCODE_CONTINUATION = 0x00
-    OPCODE_TEXT = 0x01
-    OPCODE_BINARY = 0x02
-    OPCODE_CLOSE = 0x08
-    OPCODE_PING = 0x09
-    OPCODE_PONG = 0x0a
+    OPCODE_CONTINUATION = 0x00  # 附加数据帧
+    OPCODE_TEXT = 0x01  # 文本数据帧 utf-8编码
+    OPCODE_BINARY = 0x02  # 二进制
+    OPCODE_CLOSE = 0x08 # close
+    OPCODE_PING = 0x09 # ping
+    OPCODE_PONG = 0x0a # pong
 
     def __init__(self, environ, stream, handler):
         self.environ = environ
@@ -45,7 +59,6 @@ class WebSocket(object):
         self.raw_write = stream.write
         self.raw_read = stream.read
 
-        self.utf8validator = Utf8Validator()
         self.handler = handler
 
     def __del__(self):
@@ -79,13 +92,12 @@ class WebSocket(object):
         """
 
         if not isinstance(text, str):
-            text = text_type(text or '')
+            text = str(text or '')
 
         return text.encode("utf-8")
 
     def _is_valid_close_code(self, code):
-        """
-        :returns: Whether the returned close code is a valid hybi return code.
+        """验证关闭close码是否正确
         """
         if code < 1000:
             return False
@@ -117,44 +129,8 @@ class WebSocket(object):
 
             return MockApp()
 
-    @property
-    def origin(self):
-        if not self.environ:
-            return
-
-        return self.environ.get('HTTP_ORIGIN')
-
-    @property
-    def protocol(self):
-        if not self.environ:
-            return
-
-        return self.environ.get('HTTP_SEC_WEBSOCKET_PROTOCOL')
-
-    @property
-    def version(self):
-        if not self.environ:
-            return
-
-        return self.environ.get('HTTP_SEC_WEBSOCKET_VERSION')
-
-    @property
-    def path(self):
-        if not self.environ:
-            return
-
-        return self.environ.get('PATH_INFO')
-
-    @property
-    def logger(self):
-        return self.handler.logger
-
     def handle_close(self, header, payload):
-        """
-        Called when a close frame has been decoded from the stream.
-
-        :param header: The decoded `Header`.
-        :param payload: The bytestring payload associated with the close frame.
+        """close
         """
         if not payload:
             self.close(1000, None)
@@ -169,12 +145,10 @@ class WebSocket(object):
         payload = payload[2:]
 
         if payload:
-            validator = Utf8Validator()
-            val = validator.validate(payload)
+            # 如果发送close 信息 肯定是uft编码
+            self._decode_bytes(payload)
 
-            if not val[0]:
-                raise UnicodeError
-
+        # 判断close码是否正确
         if not self._is_valid_close_code(code):
             raise ProtocolError('Invalid close code {0}'.format(code))
         self.close(code, payload)
@@ -197,9 +171,11 @@ class WebSocket(object):
 
         header = Header.decode_header(self.stream)
 
+        # 不处理rsv 信息
         if header.flags:
             raise ProtocolError
 
+        # 没有长度
         if not header.length:
             return header, b''
 
@@ -219,21 +195,8 @@ class WebSocket(object):
 
         return header, payload
 
-    def validate_utf8(self, payload):
-        # Make sure the frames are decodable independently
-        self.utf8validate_last = self.utf8validator.validate(payload)
-
-        if not self.utf8validate_last[0]:
-            raise UnicodeError("Encountered invalid UTF-8 while processing "
-                               "text message at payload octet index "
-                               "{0:d}".format(self.utf8validate_last[3]))
-
     def read_message(self):
-        """
-        Return the next text or binary message from the socket.
-
-        This is an internal method as calling this will not cleanup correctly
-        if an exception is called. Use `receive` instead.
+        """读取数据帧信息 
         """
         opcode = None
         message = bytearray()
@@ -242,16 +205,11 @@ class WebSocket(object):
             f_opcode = header.opcode
 
             if f_opcode in (self.OPCODE_TEXT, self.OPCODE_BINARY):
-                # a new frame
+                # TODO shusheng 2022-03-26 理论上读一次就行了 这里做了特殊判断 
                 if opcode:
                     raise ProtocolError("The opcode in non-fin frame is "
                                         "expected to be zero, got "
                                         "{0!r}".format(f_opcode))
-
-                # Start reading a new message, reset the validator
-                self.utf8validator.reset()
-                self.utf8validate_last = (True, True, 0, 0)
-
                 opcode = f_opcode
 
             elif f_opcode == self.OPCODE_CONTINUATION:
@@ -272,25 +230,17 @@ class WebSocket(object):
 
             else:
                 raise ProtocolError("Unexpected opcode={0!r}".format(f_opcode))
-
-            if opcode == self.OPCODE_TEXT:
-                self.validate_utf8(payload)
-
             message += payload
-
             if header.fin:
                 break
 
         if opcode == self.OPCODE_TEXT:
-            self.validate_utf8(message)
             return self._decode_bytes(message)
         else:
             return message
 
     def receive(self):
-        """
-        Read and return a message from the stream. If `None` is returned, then
-        the socket is considered closed/errored.
+        """接受声息
         """
 
         if self.closed:
@@ -307,12 +257,10 @@ class WebSocket(object):
         except error:
             self.close()
             self.current_app.on_close(MSG_CLOSED)
-
         return None
 
     def send_frame(self, message, opcode):
-        """
-        Send a frame over the websocket with message as its payload
+        """生成头部信息和内容
         """
         if self.closed:
             self.current_app.on_close(MSG_ALREADY_CLOSED)
@@ -333,11 +281,10 @@ class WebSocket(object):
             raise
 
     def send(self, message, binary=None):
-        """
-        Send a frame over the websocket with message as its payload
+        """发送报文
         """
         if binary is None:
-            binary = not isinstance(message, string_types)
+            binary = not isinstance(message, str)
 
         opcode = self.OPCODE_BINARY if binary else self.OPCODE_TEXT
 
@@ -348,10 +295,7 @@ class WebSocket(object):
             raise WebSocketError(MSG_SOCKET_DEAD)
 
     def close(self, code=1000, message=b''):
-        """
-        Close the websocket and connection, sending the specified code and
-        message.  The underlying socket object is _not_ closed, that is the
-        responsibility of the initiator.
+        """关闭
         """
 
         if self.closed:
@@ -378,10 +322,6 @@ class WebSocket(object):
 
 
 class Stream(object):
-    """
-    Wraps the handler's socket/rfile attributes and makes it in to a file like
-    object that can be read from/written to by the lower level websocket api.
-    """
 
     __slots__ = ('handler', 'read', 'write')
 
@@ -417,7 +357,7 @@ class Header(object):
         payload = bytearray(payload)
         mask = bytearray(self.mask)
 
-        for i in range_type(self.length):
+        for i in range(self.length):
             payload[i] ^= mask[i % 4]
 
         return payload
@@ -425,39 +365,30 @@ class Header(object):
     # it's the same operation
     unmask_payload = mask_payload
 
-    def __repr__(self):
-        opcodes = {
-            0: 'continuation(0)',
-            1: 'text(1)',
-            2: 'binary(2)',
-            8: 'close(8)',
-            9: 'ping(9)',
-            10: 'pong(10)'
-        }
-        flags = {
-            0x40: 'RSV1 MASK',
-            0x20: 'RSV2 MASK',
-            0x10: 'RSV3 MASK'
-        }
-
-        return ("<Header fin={0} opcode={1} length={2} flags={3} mask={4} at "
-                "0x{5:x}>").format(
-                    self.fin,
-                    opcodes.get(self.opcode, 'reserved({})'.format(self.opcode)),
-                    self.length,
-                    flags.get(self.flags, 'reserved({})'.format(self.flags)),
-                    self.mask, id(self)
-        )
-
     @classmethod
     def decode_header(cls, stream):
         """
-        Decode a WebSocket header.
-
-        :param stream: A file like object that can be 'read' from.
-        :returns: A `Header` instance.
+        0                   1                   2                   3
+        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+        +-+-+-+-+-------+-+-------------+-------------------------------+
+        |F|R|R|R| opcode|M| Payload len |    Extended payload length    |
+        |I|S|S|S|  (4)  |A|     (7)     |             (16/64)           |
+        |N|V|V|V|       |S|             |   (if payload len==126/127)   |
+        | |1|2|3|       |K|             |                               |
+        +-+-+-+-+-------+-+-------------+ - - - - - - - - - - - - - - - +
+        |     Extended payload length continued, if payload len == 127  |
+        + - - - - - - - - - - - - - - - +-------------------------------+
+        |                               |Masking-key, if MASK set to 1  |
+        +-------------------------------+-------------------------------+
+        | Masking-key (continued)       |          Payload Data         |
+        +-------------------------------- - - - - - - - - - - - - - - - +
+        :                     Payload Data continued ...                :
+        + - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - - +
+        |                     Payload Data continued ...                |
+        +---------------------------------------------------------------+
         """
         read = stream.read
+        # 读前两个字节  16bit
         data = read(2)
 
         if len(data) != 2:
@@ -466,13 +397,14 @@ class Header(object):
         first_byte, second_byte = struct.unpack('!BB', data)
 
         header = cls(
-            fin=first_byte & cls.FIN_MASK == cls.FIN_MASK,
-            opcode=first_byte & cls.OPCODE_MASK,
-            flags=first_byte & cls.HEADER_FLAG_MASK,
-            length=second_byte & cls.LENGTH_MASK)
+            fin=first_byte & cls.FIN_MASK == cls.FIN_MASK,  # fin 为1 代表结束
+            opcode=first_byte & cls.OPCODE_MASK,   # 获取opcode
+            flags=first_byte & cls.HEADER_FLAG_MASK, # 获取rsv 操作信息
+            length=second_byte & cls.LENGTH_MASK) # 获取payload len 数值
 
-        has_mask = second_byte & cls.MASK_MASK == cls.MASK_MASK
+        has_mask = second_byte & cls.MASK_MASK == cls.MASK_MASK # 判断是否对payloadData 进行掩码处理
 
+        # 0x07 之后都是 连接关闭 ping pong 所以都是fin都应该是消息结果 并且length不应该超过125
         if header.opcode > 0x07:
             if not header.fin:
                 raise ProtocolError(
@@ -484,14 +416,16 @@ class Header(object):
                     "Control frame cannot be larger than 125 bytes: "
                     "{0!r}".format(data))
 
+        # 如果126 读取后2个字节为长度
         if header.length == 126:
-            # 16 bit length
             data = read(2)
 
             if len(data) != 2:
                 raise WebSocketError('Unexpected EOF while decoding header')
 
+            # 获取无符号整形数字
             header.length = struct.unpack('!H', data)[0]
+        # 如果126 读取后8个字节为长度
         elif header.length == 127:
             # 64 bit length
             data = read(8)
@@ -499,6 +433,7 @@ class Header(object):
             if len(data) != 8:
                 raise WebSocketError('Unexpected EOF while decoding header')
 
+            # 获取无符号长整形数字
             header.length = struct.unpack('!Q', data)[0]
 
         if has_mask:
@@ -513,15 +448,7 @@ class Header(object):
 
     @classmethod
     def encode_header(cls, fin, opcode, mask, length, flags):
-        """
-        Encodes a WebSocket header.
-
-        :param fin: Whether this is the final frame for this opcode.
-        :param opcode: The opcode of the payload, see `OPCODE_*`
-        :param mask: Whether the payload is masked.
-        :param length: The length of the frame.
-        :param flags: The RSV* flags.
-        :return: A bytestring encoded header.
+        """按照头部信息生成报文
         """
         first_byte = opcode
         second_byte = 0
