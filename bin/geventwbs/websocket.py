@@ -69,13 +69,6 @@ class WebSocket(object):
             pass
 
     def _decode_bytes(self, bytestring):
-        """
-        Internal method used to convert the utf-8 encoded bytestring into
-        unicode.
-
-        If the conversion fails, the socket will be closed.
-        """
-
         if not bytestring:
             return ''
 
@@ -87,10 +80,6 @@ class WebSocket(object):
             raise
 
     def _encode_bytes(self, text):
-        """
-        :returns: The utf-8 byte string equivalent of `text`.
-        """
-
         if not isinstance(text, str):
             text = str(text or '')
 
@@ -109,7 +98,6 @@ class WebSocket(object):
             return False
 
         if code == 1100:
-            # not sure about this one but the autobahn fuzzer requires it.
             return False
 
         if 2000 <= code <= 2999:
@@ -122,7 +110,6 @@ class WebSocket(object):
         if hasattr(self.handler.server.application, 'current_app'):
             return self.handler.server.application.current_app
         else:
-            # For backwards compatibility reasons
             class MockApp():
                 def on_close(self, *args):
                     pass
@@ -130,8 +117,6 @@ class WebSocket(object):
             return MockApp()
 
     def handle_close(self, header, payload):
-        """close
-        """
         if not payload:
             self.close(1000, None)
 
@@ -160,14 +145,6 @@ class WebSocket(object):
         pass
 
     def read_frame(self):
-        """
-        Block until a full frame has been read from the socket.
-
-        This is an internal method as calling this will not cleanup correctly
-        if an exception is called. Use `receive` instead.
-
-        :return: The header and payload as a tuple.
-        """
 
         header = Header.decode_header(self.stream)
 
@@ -196,8 +173,6 @@ class WebSocket(object):
         return header, payload
 
     def read_message(self):
-        """读取数据帧信息 
-        """
         opcode = None
         message = bytearray()
         while True:
@@ -240,9 +215,6 @@ class WebSocket(object):
             return message
 
     def receive(self):
-        """接受声息
-        """
-
         if self.closed:
             self.current_app.on_close(MSG_ALREADY_CLOSED)
             raise WebSocketError(MSG_ALREADY_CLOSED)
@@ -260,8 +232,6 @@ class WebSocket(object):
         return None
 
     def send_frame(self, message, opcode):
-        """生成头部信息和内容
-        """
         if self.closed:
             self.current_app.on_close(MSG_ALREADY_CLOSED)
             raise WebSocketError(MSG_ALREADY_CLOSED)
@@ -281,8 +251,6 @@ class WebSocket(object):
             raise
 
     def send(self, message, binary=None):
-        """发送报文
-        """
         if binary is None:
             binary = not isinstance(message, str)
 
@@ -295,9 +263,6 @@ class WebSocket(object):
             raise WebSocketError(MSG_SOCKET_DEAD)
 
     def close(self, code=1000, message=b''):
-        """关闭
-        """
-
         if self.closed:
             self.current_app.on_close(MSG_ALREADY_CLOSED)
 
@@ -317,8 +282,6 @@ class WebSocket(object):
             self.raw_read = None
 
             self.environ = None
-
-            #self.current_app.on_close(MSG_ALREADY_CLOSED)
 
 
 class Stream(object):
@@ -343,7 +306,6 @@ class Header(object):
     RSV1_MASK = 0x20
     RSV2_MASK = 0x10
 
-    # bitwise mask that will determine the reserved bits for a frame header
     HEADER_FLAG_MASK = RSV0_MASK | RSV1_MASK | RSV2_MASK
 
     def __init__(self, fin=0, opcode=0, flags=0, length=0):
@@ -362,7 +324,6 @@ class Header(object):
 
         return payload
 
-    # it's the same operation
     unmask_payload = mask_payload
 
     @classmethod
@@ -448,8 +409,6 @@ class Header(object):
 
     @classmethod
     def encode_header(cls, fin, opcode, mask, length, flags):
-        """按照头部信息生成报文
-        """
         first_byte = opcode
         second_byte = 0
         extra = b""
