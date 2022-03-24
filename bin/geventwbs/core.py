@@ -26,7 +26,6 @@ class WebSocketApplication(object):
         self.ws = ws
 
     def handle(self):
-        logger.set_req_id()
         self.on_open()
         while True:
             try:
@@ -146,6 +145,10 @@ class WebSocketHandler(WSGIHandler):
     def run_application(self):
         """wsgi 复用run_application 方法
         """
+        # 设置请求头部log id websocket 可以设置头部信息
+        reqid = self.environ.get('X-Req-Id', '')
+        logger.set_req_id(reqid)
+        log.debug('X-Req-Id: %s', reqid)
         # 获取请求结果
         self.result = self.upgrade_websocket()
 
@@ -268,10 +271,14 @@ class WebSocketHandler(WSGIHandler):
             hashlib.sha1((key + self.GUID).encode("latin-1")).digest()
         ).decode("latin-1")
 
+        # 默认支持跨域
+        http_origin = self.environ.get('HTTP_ORIGIN', '')
+
         headers = [
             ("Upgrade", "websocket"),
             ("Connection", "Upgrade"),
-            ("Sec-WebSocket-Accept", accept)
+            ("Sec-WebSocket-Accept", accept),
+            ("Access-Control-Allow-Origin", http_origin),
         ]
 
         if protocol:

@@ -177,6 +177,7 @@ class WebSocket(object):
         message = bytearray()
         while True:
             header, payload = self.read_frame()
+            log.debug('opcode:%s|payload:%s', header.opcode, payload)
             f_opcode = header.opcode
 
             if f_opcode in (self.OPCODE_TEXT, self.OPCODE_BINARY):
@@ -208,7 +209,6 @@ class WebSocket(object):
             message += payload
             if header.fin:
                 break
-
         if opcode == self.OPCODE_TEXT:
             return self._decode_bytes(message)
         else:
